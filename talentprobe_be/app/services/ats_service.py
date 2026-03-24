@@ -20,6 +20,7 @@ from app.models.schemas import (
     ATSScanHistoryItem,
     KeywordGapRequest,
     KeywordGapResponse,
+    ProfessionATSRequest,
     ResumeExtractResponse,
     ResumeOptimizeRequest,
     ResumeOptimizeResponse,
@@ -28,7 +29,7 @@ from app.models.schemas import (
 
 
 class ATSService:
-    DAILY_SCAN_LIMIT = 10
+    DEFAULT_DAILY_SCAN_LIMIT = 3
     DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 
     REQUIRED_SECTIONS = [
@@ -84,6 +85,19 @@ class ATSService:
 
     SUPPORTED_FILE_TYPES = {"pdf", "docx"}
 
+    DEFAULT_PROFESSIONS: list[tuple[str, str, int]] = [
+        ("Software Engineer", "Focus on scalable delivery, cloud readiness, and cross-functional execution in UAE teams.", 10),
+        ("Data Analyst", "Emphasize BI reporting, KPI ownership, and stakeholder communication for UAE business units.", 20),
+        ("Product Manager", "Highlight product discovery, roadmap ownership, and regional market adaptation for UAE users.", 30),
+        ("Accountant", "Prioritize IFRS compliance, VAT familiarity, and audit-readiness in UAE finance operations.", 40),
+        ("Sales Executive", "Focus on pipeline growth, relationship management, and GCC/UAE B2B sales cycles.", 50),
+        ("Digital Marketing Specialist", "Showcase performance marketing, multilingual campaigns, and UAE audience segmentation.", 60),
+        ("HR Specialist", "Emphasize UAE labor law awareness, talent operations, and multicultural workforce support.", 70),
+        ("Operations Manager", "Highlight process optimization, vendor management, and service-level execution in UAE contexts.", 80),
+        ("Project Manager", "Focus on delivery governance, risk control, and multi-vendor coordination in regional projects.", 90),
+        ("Customer Support Specialist", "Emphasize SLA handling, multilingual communication, and customer retention outcomes.", 100),
+    ]
+
     def __init__(self) -> None:
         self.db_config = self._resolve_db_config()
         self.gemini_api_key = os.getenv("GEMINI_API_KEY", "").strip()
@@ -94,6 +108,68 @@ class ATSService:
         result = self._check_ats_with_gemini(payload)
         self._save_scan_history(user_id, payload, result)
         return result
+
+    def list_professions(self) -> list[dict[str, Any]]:
+        with closing(self._get_connection()) as conn:
+            self._ensure_default_professions(conn)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT id AS profession_id, profession_name
+                FROM professions
+                WHERE is_active = 1
+                ORDER BY sort_order ASC, profession_name ASC
+                """
+            )
+            rows = cursor.fetchall()
+
+        return [
+            {
+                "profession_id": int(row["profession_id"]),
+                "profession_name": str(row["profession_name"]),
+            }
+            for row in rows
+        ]
+
+    def check_profession_ats(
+        self,
+        payload: ProfessionATSRequest,
+        user_id: int,
+    ) -> tuple[int, str, str, ATSCheckResponse]:
+        with closing(self._get_connection()) as conn:
+            self._ensure_default_professions(conn)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                """
+                SELECT id AS profession_id, profession_name, uae_context
+                FROM professions
+                WHERE id = %s AND is_active = 1
+                LIMIT 1
+                """,
+                (payload.profession_id,),
+            )
+            profession = cursor.fetchone()
+
+        if profession is None:
+            raise ValueError("Selected profession is not available")
+
+        profession_name = str(profession["profession_name"])
+        analysis_basis = self._build_generic_profession_jd(
+            profession_name,
+            str(profession.get("uae_context") or "").strip() or None,
+        )
+
+        synthesized_payload = ATSCheckRequest(
+            resume_text=payload.resume_text,
+            job_description=analysis_basis,
+            target_role=profession_name,
+            industry="UAE",
+            resume_id=payload.resume_id,
+            resume_file_name=payload.resume_file_name,
+            resume_file_type=payload.resume_file_type,
+        )
+        result = self.check_ats(synthesized_payload, user_id)
+        return int(profession["profession_id"]), profession_name, analysis_basis, result
 
     def list_scan_history(self, user_id: int) -> list[ATSScanHistoryItem]:
         with closing(self._get_connection()) as conn:
@@ -175,6 +251,24 @@ class ATSService:
             cursor = conn.cursor(dictionary=True)
             cursor.execute(
                 """
+                SELECT
+                    u.daily_scan_limit,
+                    COALESCE(u.current_plan_code, 'basic') AS current_plan_code,
+                    COALESCE(sp.plan_name, 'Basic') AS current_plan_name,
+                    u.plan_expires_at
+                FROM users u
+                LEFT JOIN subscription_plans sp ON sp.plan_code = u.current_plan_code
+                WHERE u.id = %s
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            user_row = cursor.fetchone() or {}
+
+            daily_limit = self._get_user_daily_scan_limit(conn, user_id)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                """
                 SELECT scan_count
                 FROM ats_scan_usage
                 WHERE user_id = %s AND scan_date = %s
@@ -185,14 +279,20 @@ class ATSService:
             row = cursor.fetchone()
 
         used_today = int((row or {}).get("scan_count") or 0)
-        remaining_today = max(0, self.DAILY_SCAN_LIMIT - used_today)
+        remaining_today = max(0, daily_limit - used_today)
 
         return {
-            "daily_limit": self.DAILY_SCAN_LIMIT,
+            "daily_limit": daily_limit,
             "used_today": used_today,
             "remaining_today": remaining_today,
             "reset_at_utc": self._next_utc_midnight(),
+            "current_plan_code": str(user_row.get("current_plan_code") or "basic"),
+            "current_plan_name": str(user_row.get("current_plan_name") or "Basic"),
+            "plan_expires_at": user_row.get("plan_expires_at"),
         }
+
+    def consume_ai_quota(self, user_id: int) -> None:
+        self._consume_scan_quota(user_id)
 
     def _check_ats_with_rules(self, payload: ATSCheckRequest) -> ATSCheckResponse:
         resume_tokens = self._extract_keywords(payload.resume_text)
@@ -470,6 +570,7 @@ class ATSService:
         scan_day = self._today_utc_date()
 
         with closing(self._get_connection()) as conn:
+            daily_limit = self._get_user_daily_scan_limit(conn, user_id)
             cursor = conn.cursor(dictionary=True)
             cursor.execute(
                 """
@@ -495,9 +596,9 @@ class ATSService:
                 return
 
             current_count = int(row.get("scan_count") or 0)
-            if current_count >= self.DAILY_SCAN_LIMIT:
+            if current_count >= daily_limit:
                 raise ScanLimitExceededError(
-                    f"Daily ATS scan limit reached ({self.DAILY_SCAN_LIMIT}/day). Please try again tomorrow."
+                    f"Daily AI usage limit reached ({daily_limit}/day). Please try again tomorrow."
                 )
 
             cursor = conn.cursor()
@@ -510,6 +611,25 @@ class ATSService:
                 (self._now_utc(), user_id, scan_day),
             )
             conn.commit()
+
+    def _get_user_daily_scan_limit(self, conn: MySQLConnectionAbstract, user_id: int) -> int:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT COALESCE(daily_scan_limit, %s) AS daily_scan_limit
+            FROM users
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (self.DEFAULT_DAILY_SCAN_LIMIT, user_id),
+        )
+        row = cursor.fetchone() or {}
+        try:
+            value = int(row.get("daily_scan_limit") or self.DEFAULT_DAILY_SCAN_LIMIT)
+        except (TypeError, ValueError):
+            value = self.DEFAULT_DAILY_SCAN_LIMIT
+
+        return max(1, value)
 
     def _save_scan_history(self, user_id: int, payload: ATSCheckRequest, result: ATSCheckResponse) -> None:
         resume_file_name = self._normalize_optional_short_text(payload.resume_file_name, max_length=255)
@@ -581,6 +701,39 @@ class ATSService:
     def _extract_text_from_docx(self, file_bytes: bytes) -> str:
         document = Document(BytesIO(file_bytes))
         return "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+    def _build_generic_profession_jd(self, profession_name: str, uae_context: str | None) -> str:
+        context_line = uae_context or (
+            "Demonstrate measurable outcomes, strong communication, and adaptation to UAE's multicultural work environment."
+        )
+        return (
+            f"Generic UAE hiring benchmark for {profession_name}. "
+            "This is not a specific job post. Evaluate whether the CV demonstrates role-relevant delivery, "
+            "impact metrics, modern tools/practices, and UAE market awareness (GCC context, local regulations, "
+            "cross-cultural collaboration, and business communication). "
+            f"Profession-specific emphasis: {context_line} "
+            "Expect concise achievements, domain terminology, and progression in responsibilities."
+        )
+
+    def _ensure_default_professions(self, conn: MySQLConnectionAbstract) -> None:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT COUNT(*) AS total FROM professions")
+        row = cursor.fetchone() or {"total": 0}
+        if int(row.get("total") or 0) > 0:
+            return
+
+        insert_cursor = conn.cursor()
+        insert_cursor.executemany(
+            """
+            INSERT INTO professions (profession_name, uae_context, sort_order, is_active, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            [
+                (name, context, sort_order, 1, self._now_utc(), self._now_utc())
+                for name, context, sort_order in self.DEFAULT_PROFESSIONS
+            ],
+        )
+        conn.commit()
 
     def _extract_keywords(self, text: str) -> Set[str]:
         tokens = re.findall(r"[A-Za-z][A-Za-z\-\+\.]{1,}", text.lower())

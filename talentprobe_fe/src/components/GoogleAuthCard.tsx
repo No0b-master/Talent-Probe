@@ -43,7 +43,7 @@ export function GoogleAuthCard({
           login(res.data.access_token);
           toast({
             title: 'Signed in with Google',
-            description: 'Welcome to Talent Probe UAE.',
+            description: 'Welcome to TalentProbe.',
           });
           navigate('/dashboard');
         }

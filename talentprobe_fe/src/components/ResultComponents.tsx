@@ -39,7 +39,7 @@ export function CopyButton({ text, className }: CopyButtonProps) {
     >
       {copied ? (
         <>
-          <Check className="h-3.5 w-3.5 text-green-500" />
+          <Check className="h-3.5 w-3.5 text-primary" />
           Copied
         </>
       ) : (
@@ -95,9 +95,9 @@ export function ScoreBar({ label, value }: ScoreBarProps) {
   const clamped = Math.min(100, Math.max(0, value));
   const color =
     clamped >= 70
-      ? 'bg-green-500'
+      ? 'bg-primary'
       : clamped >= 40
-      ? 'bg-amber-400'
+      ? 'bg-accent'
       : 'bg-red-500';
 
   return (
@@ -124,9 +124,9 @@ interface KeywordChipsProps {
 }
 
 const chipStyles = {
-  matched: 'bg-green-50 text-green-700 border border-green-200',
-  missing: 'bg-red-50 text-red-700 border border-red-200',
-  priority: 'bg-amber-50 text-amber-700 border border-amber-200',
+  matched: 'bg-cyan-50 text-cyan-700 border border-cyan-200',
+  missing: 'bg-rose-50 text-rose-700 border border-rose-200',
+  priority: 'bg-violet-50 text-violet-700 border border-violet-200',
   neutral: 'bg-secondary text-secondary-foreground border border-border',
 };
 

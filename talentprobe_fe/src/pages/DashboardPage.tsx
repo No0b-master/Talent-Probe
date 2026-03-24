@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/context/AuthContext';
 import { ATSCheck } from '@/components/tools/ATSCheck';
 import { ResumeOptimizer } from '@/components/tools/ResumeOptimizer';
 import { KeywordGap } from '@/components/tools/KeywordGap';
+import { ProfessionAnalysis } from '@/components/tools/ProfessionAnalysis';
 import { Button } from '@/components/ui/button';
-import { LogOut, FileSearch2, Wand2, BarChart3, ChevronDown } from 'lucide-react';
+import { FileSearch2, Wand2, BarChart3, ChevronDown, BriefcaseBusiness } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ThemeToggle } from '@/components/ThemeToggle';
-import { UAEFlagStrip } from '@/components/UAEFlag';
-import { api, type RegisteredUser } from '@/lib/api';
+import { CommonHeader } from '@/components/CommonHeader';
+import { CommonFooter } from '@/components/CommonFooter';
+
+import { api, type ATSUsage, type RegisteredUser } from '@/lib/api';
 
 // ─── Tool definitions ─────────────────────────────────────────────────────────
 
@@ -20,6 +20,13 @@ const TOOLS = [
     description: 'Score your resume against a job description for ATS compatibility.',
     icon: FileSearch2,
     badge: 'Popular',
+  },
+  {
+    id: 'profession-analysis',
+    label: 'Profession Analysis',
+    description: 'Analyze your CV against a generic UAE benchmark for your selected profession.',
+    icon: BriefcaseBusiness,
+    badge: 'UAE',
   },
   {
     id: 'optimizer',
@@ -67,7 +74,7 @@ function ToolCard({ tool, active, onClick }: ToolCardProps) {
             'absolute right-3 top-3 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
             active
               ? 'bg-primary-foreground/20 text-primary-foreground'
-              : 'bg-gold-muted text-accent-foreground'
+              : 'bg-gold-muted text-accent'
           )}
         >
           {tool.badge}
@@ -79,17 +86,17 @@ function ToolCard({ tool, active, onClick }: ToolCardProps) {
           active ? 'text-primary-foreground' : 'text-primary'
         )}
       />
-      <p className="font-semibold text-sm">{tool.label}</p>
+      <p className={cn('font-semibold text-sm', active && 'text-white')}>{tool.label}</p>
       <p
         className={cn(
           'mt-1 text-xs leading-snug',
-          active ? 'text-primary-foreground/80' : 'text-muted-foreground'
+          active ? 'text-white/95' : 'text-muted-foreground'
         )}
       >
         {tool.description}
       </p>
       {active && (
-        <ChevronDown className="absolute bottom-3 right-3 h-4 w-4 text-primary-foreground/60" />
+        <ChevronDown className="absolute bottom-3 right-3 h-4 w-4 text-white/85" />
       )}
     </button>
   );
@@ -98,99 +105,74 @@ function ToolCard({ tool, active, onClick }: ToolCardProps) {
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const { logout } = useAuth();
-  const navigate = useNavigate();
-  const [activeTool, setActiveTool] = useState<ToolId>('ats');
+  const [activeTool, setActiveTool] = useState<ToolId>('profession-analysis');
   const [profile, setProfile] = useState<RegisteredUser | null>(null);
+  const [usage, setUsage] = useState<ATSUsage | null>(null);
+  const [usageLoading, setUsageLoading] = useState(true);
+
+  const loadUsage = async () => {
+    setUsageLoading(true);
+    try {
+      const res = await api.ats.usage();
+      if (res.success) {
+        setUsage(res.data);
+      }
+    } catch {
+      setUsage(null);
+    } finally {
+      setUsageLoading(false);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
-    const loadProfile = async () => {
+    const loadHeaderData = async () => {
       try {
-        const res = await api.auth.me();
-        if (mounted && res.success) {
-          setProfile(res.data);
+        const [profileRes, usageRes] = await Promise.all([api.auth.me(), api.ats.usage()]);
+        if (!mounted) {
+          return;
+        }
+
+        if (profileRes.success) {
+          setProfile(profileRes.data);
+        }
+
+        if (usageRes.success) {
+          setUsage(usageRes.data);
         }
       } catch {
         if (mounted) {
           setProfile(null);
+          setUsage(null);
+        }
+      } finally {
+        if (mounted) {
+          setUsageLoading(false);
         }
       }
     };
 
-    loadProfile();
+    void loadHeaderData();
     return () => {
       mounted = false;
     };
   }, []);
 
-  const handleLogout = () => {
-    logout();
-    navigate('/', { replace: true });
-  };
-
   const toggleTool = (id: ToolId) => {
     setActiveTool(id);
   };
 
+  const usagePercent = usage
+    ? Math.min(100, Math.max(0, Math.round((usage.used_today / Math.max(usage.daily_limit, 1)) * 100)))
+    : 0;
+
+  const handleUsageUpdated = () => {
+    void loadUsage();
+  };
+
   return (
     <div className="min-h-screen bg-background">
-      {/* ── Header ── */}
-      <header className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur-sm shadow-brand-sm">
-        {/* UAE flag strip */}
-        <UAEFlagStrip className="rounded-none h-1.5" />
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-3 sm:px-5 py-3">
-          <div className="flex items-center gap-3">
-            <img src="/welkdock_logo.png" alt="Welkdock Technologies logo" className="h-9 w-9 rounded-lg object-contain" />
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-bold text-foreground leading-none">Talent Probe</span>
-                <span className="inline-flex items-center gap-0.5 rounded-full border border-border bg-secondary px-2 py-0.5 text-[10px] font-semibold text-foreground uppercase tracking-wide">
-                  🇦🇪 UAE
-                </span>
-              </div>
-              <p className="text-[11px] text-muted-foreground">by Welkdock Technologies</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 rounded-full border border-border bg-card px-2 py-1.5 max-w-[210px] sm:max-w-[320px]">
-              {profile?.profile_image_url ? (
-                <img
-                  src={profile.profile_image_url}
-                  alt="Google profile"
-                  className="h-7 w-7 rounded-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
-                  {profile?.full_name?.charAt(0)?.toUpperCase() || 'U'}
-                </div>
-              )}
-              <div className="min-w-0">
-                <p className="truncate text-xs font-medium text-foreground">
-                  {profile?.full_name || 'Signed in user'}
-                </p>
-                <p className="truncate text-[11px] text-muted-foreground">
-                  {profile?.email || 'Signed in'}
-                </p>
-              </div>
-            </div>
-            <ThemeToggle />
-            <Button asChild variant="outline" size="sm" className="gap-1.5">
-              <Link to="/profile">Profile</Link>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleLogout}
-              className="gap-1.5 text-muted-foreground hover:text-destructive hover:border-destructive"
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
-          </div>
-        </div>
-      </header>
+      <CommonHeader />
 
       {/* ── Main ── */}
       <main className="mx-auto max-w-7xl px-3 sm:px-5 py-8 space-y-8">
@@ -202,8 +184,10 @@ export default function DashboardPage() {
           </p>
         </div>
 
+        
+
         {/* Tool selector */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 animate-fade-up">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 animate-fade-up">
           {TOOLS.map(tool => (
             <ToolCard
               key={tool.id}
@@ -237,12 +221,14 @@ export default function DashboardPage() {
 
           {/* Panel content */}
           <div className="px-4 py-5">
-            {activeTool === 'ats' && <ATSCheck />}
-            {activeTool === 'optimizer' && <ResumeOptimizer />}
-            {activeTool === 'keyword-gap' && <KeywordGap />}
+            {activeTool === 'ats' && <ATSCheck onUsageUpdated={handleUsageUpdated} />}
+            {activeTool === 'profession-analysis' && <ProfessionAnalysis onUsageUpdated={handleUsageUpdated} />}
+            {activeTool === 'optimizer' && <ResumeOptimizer onUsageUpdated={handleUsageUpdated} />}
+            {activeTool === 'keyword-gap' && <KeywordGap onUsageUpdated={handleUsageUpdated} />}
           </div>
         </div>
       </main>
+      <CommonFooter />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.controllers.ats_controller import ATSController
-from app.models.schemas import ATSCheckRequest, KeywordGapRequest, RegisteredUser, ResumeOptimizeRequest
+from app.models.schemas import ATSCheckRequest, KeywordGapRequest, ProfessionATSRequest, RegisteredUser, ResumeOptimizeRequest
 from app.services.ats_service import GeminiUnavailableError, ScanLimitExceededError
 from app.services.auth_dependency import get_current_user
 
@@ -17,6 +17,11 @@ def health_check():
 @router.get("/ats/usage")
 def ats_usage(current_user: RegisteredUser = Depends(get_current_user)):
     return controller.get_ats_usage(current_user)
+
+
+@router.get("/professions")
+def list_professions(_: RegisteredUser = Depends(get_current_user)):
+    return controller.list_professions()
 
 
 @router.get("/ats/history")
@@ -44,14 +49,32 @@ def ats_check(payload: ATSCheckRequest, current_user: RegisteredUser = Depends(g
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/ats/profession-analysis")
+def ats_profession_analysis(payload: ProfessionATSRequest, current_user: RegisteredUser = Depends(get_current_user)):
+    try:
+        return controller.check_profession_ats(current_user, payload)
+    except ScanLimitExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except GeminiUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/resume/optimize")
-def resume_optimize(payload: ResumeOptimizeRequest, _: RegisteredUser = Depends(get_current_user)):
-    return controller.optimize_resume(payload)
+def resume_optimize(payload: ResumeOptimizeRequest, current_user: RegisteredUser = Depends(get_current_user)):
+    try:
+        return controller.optimize_resume(current_user, payload)
+    except ScanLimitExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
 
 
 @router.post("/resume/keyword-gap")
-def resume_keyword_gap(payload: KeywordGapRequest, _: RegisteredUser = Depends(get_current_user)):
-    return controller.keyword_gap(payload)
+def resume_keyword_gap(payload: KeywordGapRequest, current_user: RegisteredUser = Depends(get_current_user)):
+    try:
+        return controller.keyword_gap(current_user, payload)
+    except ScanLimitExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
 
 
 @router.post("/resume/extract-text")

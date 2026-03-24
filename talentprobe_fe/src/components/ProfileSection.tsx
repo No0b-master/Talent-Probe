@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Download, Eye, Trash2 } from 'lucide-react';
+import { Download, Eye, Github, Linkedin, Trash2, Twitter } from 'lucide-react';
 
-import { api, type CandidateProfile, type CandidateProfileUpdatePayload, type ResumeLibraryItem } from '@/lib/api';
+import { api, type ATSScanHistoryItem, type CandidateProfile, type CandidateProfileUpdatePayload, type ResumeLibraryItem } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,6 +62,8 @@ export function ProfileSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyDeletingId, setHistoryDeletingId] = useState<number | null>(null);
   const [profileForm, setProfileForm] = useState<ProfileFormState>({
     full_name: '',
     dob: '',
@@ -73,17 +75,26 @@ export function ProfileSection() {
     twitter_url: '',
   });
   const [resumes, setResumes] = useState<ResumeLibraryItem[]>([]);
+  const [scanHistory, setScanHistory] = useState<ATSScanHistoryItem[]>([]);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+      setHistoryLoading(true);
       try {
-        const [profileRes, resumesRes] = await Promise.all([api.profile.get(), api.resumes.list()]);
+        const [profileRes, resumesRes, historyRes] = await Promise.all([
+          api.profile.get(),
+          api.resumes.list(),
+          api.ats.history(),
+        ]);
         if (profileRes.success) {
           setProfileForm(toForm(profileRes.data));
         }
         if (resumesRes.success) {
           setResumes(resumesRes.data);
+        }
+        if (historyRes.success) {
+          setScanHistory(historyRes.data);
         }
       } catch (err: unknown) {
         toast({
@@ -93,6 +104,7 @@ export function ProfileSection() {
         });
       } finally {
         setLoading(false);
+        setHistoryLoading(false);
       }
     };
 
@@ -209,6 +221,37 @@ export function ProfileSection() {
     }
   };
 
+  const handleDeleteScanHistoryItem = async (scanId: number) => {
+    setHistoryDeletingId(scanId);
+    try {
+      const res = await api.ats.deleteHistoryItem(scanId);
+      if (res.success) {
+        setScanHistory(prev => prev.filter(item => item.scan_id !== scanId));
+        toast({ title: 'Scan history item removed' });
+      }
+    } catch (err: unknown) {
+      toast({
+        title: 'Unable to delete scan history item',
+        description: err instanceof Error ? err.message : 'Please try again',
+        variant: 'destructive',
+      });
+    } finally {
+      setHistoryDeletingId(null);
+    }
+  };
+
+  const formatScanDate = (value: string) => {
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return value;
+    return dt.toLocaleString([], {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
   const handleDownloadResume = async (resumeId: number, fallbackName: string, fileType: string) => {
     try {
       const res = await api.resumes.download(resumeId);
@@ -272,11 +315,16 @@ export function ProfileSection() {
   }
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr] animate-fade-up">
+    <section className="space-y-4 animate-fade-up">
+      <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
       <form onSubmit={handleSaveProfile} className="rounded-2xl border border-border bg-card p-5 shadow-brand-sm space-y-4">
         <div>
           <h2 className="text-lg font-semibold text-foreground">Candidate Profile</h2>
           <p className="text-xs text-muted-foreground">Keep your details updated for better resume guidance.</p>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Basic Information</p>
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4">
@@ -300,17 +348,38 @@ export function ProfileSection() {
             <Label htmlFor="profile-exp">Experience (years)</Label>
             <Input id="profile-exp" type="number" min="0" step="0.1" value={profileForm.experience_years} onChange={setField('experience_years')} />
           </div>
-          <div>
-            <Label htmlFor="profile-linkedin">LinkedIn</Label>
-            <Input id="profile-linkedin" value={profileForm.linkedin_url} onChange={setField('linkedin_url')} placeholder="https://linkedin.com/in/username" />
-          </div>
-          <div>
-            <Label htmlFor="profile-github">GitHub</Label>
-            <Input id="profile-github" value={profileForm.github_url} onChange={setField('github_url')} placeholder="https://github.com/username" />
-          </div>
-          <div>
-            <Label htmlFor="profile-twitter">Twitter/X</Label>
-            <Input id="profile-twitter" value={profileForm.twitter_url} onChange={setField('twitter_url')} placeholder="https://x.com/username" />
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Social Media</p>
+          <div className="mt-3 space-y-3">
+            <div className="flex items-center gap-3">
+              <Linkedin className="h-4 w-4 shrink-0 text-[#0A66C2]" />
+              <Input
+                id="profile-linkedin"
+                value={profileForm.linkedin_url}
+                onChange={setField('linkedin_url')}
+                placeholder="https://linkedin.com/in/username"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <Github className="h-4 w-4 shrink-0 text-[#181717]" />
+              <Input
+                id="profile-github"
+                value={profileForm.github_url}
+                onChange={setField('github_url')}
+                placeholder="https://github.com/username"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <Twitter className="h-4 w-4 shrink-0 text-[#1D9BF0]" />
+              <Input
+                id="profile-twitter"
+                value={profileForm.twitter_url}
+                onChange={setField('twitter_url')}
+                placeholder="https://x.com/username"
+              />
+            </div>
           </div>
         </div>
 
@@ -393,6 +462,63 @@ export function ProfileSection() {
               ))}
             </ul>
           </TooltipProvider>
+        )}
+      </div>
+      </div>
+
+      <div className="rounded-2xl border border-border bg-card p-5 shadow-brand-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold text-foreground">Scan History</h3>
+          <span className="text-xs text-muted-foreground">{scanHistory.length} saved</span>
+        </div>
+
+        {historyLoading ? (
+          <p className="text-sm text-muted-foreground">Loading scan history...</p>
+        ) : scanHistory.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No scan logs yet. Run ATS Check and your logs will appear here.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {scanHistory.map(scan => (
+              <li key={scan.scan_id} className="rounded-xl border border-border bg-background px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-border bg-card px-2 py-0.5 text-xs font-semibold text-foreground">
+                        ATS {scan.overall_score}/100
+                      </span>
+                      <span className="text-xs text-muted-foreground">{formatScanDate(scan.created_at)}</span>
+                      {!scan.resume_id && (
+                        <span className="rounded-full border border-amber-400 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                          CV Deleted
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-sm text-foreground leading-relaxed">{scan.summary}</p>
+
+                    <p className="text-xs text-muted-foreground">
+                      CV: {scan.resume_file_name || 'Custom text'}
+                      {!scan.resume_id && scan.resume_file_name && ' (deleted)'} • Matched: {scan.matched_keywords_count} • Missing: {scan.missing_keywords_count}
+                    </p>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handleDeleteScanHistoryItem(scan.scan_id)}
+                    disabled={historyDeletingId === scan.scan_id}
+                    aria-label="Delete scan history item"
+                    className="text-muted-foreground hover:text-destructive hover:border-destructive"
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </section>

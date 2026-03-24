@@ -67,7 +67,7 @@ function KeywordGapResults({ result }: { result: KeywordGapResult }) {
 
       {missing.length === 0 && priority.length === 0 && (
         <ResultBlock>
-          <p className="text-sm text-green-600 font-medium text-center py-2">
+          <p className="text-sm text-primary font-medium text-center py-2">
             ✓ No significant keyword gaps detected!
           </p>
         </ResultBlock>
@@ -76,7 +76,11 @@ function KeywordGapResults({ result }: { result: KeywordGapResult }) {
   );
 }
 
-export function KeywordGap() {
+interface KeywordGapProps {
+  onUsageUpdated?: () => void;
+}
+
+export function KeywordGap({ onUsageUpdated }: KeywordGapProps) {
   const { toast } = useToast();
   const [form, setForm] = useState({ resume_text: '', job_description: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -116,6 +120,7 @@ export function KeywordGap() {
       if (res.success) {
         setResult(res.data);
         toast({ title: 'Keyword gap analysis complete ✓' });
+        onUsageUpdated?.();
       }
     } catch (err: unknown) {
       toast({

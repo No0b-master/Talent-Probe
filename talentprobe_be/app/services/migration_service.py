@@ -31,7 +31,8 @@ class MigrationService:
                     continue
 
                 cursor = conn.cursor()
-                cursor.execute(sql)
+                for statement in self._split_sql_statements(sql):
+                    cursor.execute(statement)
                 cursor.execute(
                     """
                     INSERT INTO schema_migrations (version, filename, applied_at)
@@ -68,6 +69,19 @@ class MigrationService:
         cursor.execute("SELECT version FROM schema_migrations")
         rows = cursor.fetchall()
         return {row["version"] for row in rows}
+
+    @staticmethod
+    def _split_sql_statements(sql: str) -> list[str]:
+        cleaned_lines: list[str] = []
+        for line in sql.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("--") or stripped.startswith("#"):
+                continue
+            cleaned_lines.append(line)
+
+        normalized = "\n".join(cleaned_lines)
+        statements = [part.strip() for part in normalized.split(";") if part.strip()]
+        return statements
 
     def _get_connection(self, include_database: bool = True) -> MySQLConnectionAbstract:
         config = {

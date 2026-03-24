@@ -1,4 +1,4 @@
-// Talent Probe UAE — API Client
+// TalentProbe UAE — API Client
 // Centralized HTTP client with auth interceptor
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
@@ -104,11 +104,53 @@ export interface ATSCheckResult {
   [key: string]: unknown;
 }
 
+export interface ProfessionOption {
+  profession_id: number;
+  profession_name: string;
+}
+
+export interface ProfessionAnalysisPayload {
+  resume_text: string;
+  profession_id: number;
+  resume_id?: number;
+  resume_file_name?: string;
+  resume_file_type?: string;
+}
+
+export interface ProfessionAnalysisResult {
+  profession_id: number;
+  profession_name: string;
+  analysis_basis: string;
+  analysis: ATSCheckResult;
+}
+
 export interface ATSUsage {
   daily_limit: number;
   used_today: number;
   remaining_today: number;
   reset_at_utc: string;
+  current_plan_code: string;
+  current_plan_name: string;
+  plan_expires_at?: string | null;
+}
+
+export interface SubscriptionPlan {
+  plan_code: string;
+  plan_name: string;
+  daily_limit: number;
+  price_usd: number;
+  duration_days: number;
+  is_free: boolean;
+}
+
+export interface CurrentSubscription {
+  current_plan_code: string;
+  current_plan_name: string;
+  daily_limit: number;
+  price_usd: number;
+  started_at?: string | null;
+  expires_at?: string | null;
+  is_active_paid: boolean;
 }
 
 export interface ATSScanHistoryItem {
@@ -358,8 +400,19 @@ export const api = {
         method: 'DELETE',
       }, true),
 
+    professions: () =>
+      request<ApiResponse<ProfessionOption[]>>('/api/v1/professions', {
+        method: 'GET',
+      }, true),
+
     check: (payload: ATSCheckPayload) =>
       request<ApiResponse<ATSCheckResult>>('/api/v1/ats/check', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }, true),
+
+    professionAnalysis: (payload: ProfessionAnalysisPayload) =>
+      request<ApiResponse<ProfessionAnalysisResult>>('/api/v1/ats/profession-analysis', {
         method: 'POST',
         body: JSON.stringify(payload),
       }, true),
@@ -392,6 +445,24 @@ export const api = {
       request<ApiResponse<CandidateProfile>>('/api/v1/profile', {
         method: 'PUT',
         body: JSON.stringify(payload),
+      }, true),
+  },
+
+  plans: {
+    list: () =>
+      request<ApiResponse<SubscriptionPlan[]>>('/api/v1/plans', {
+        method: 'GET',
+      }, true),
+
+    current: () =>
+      request<ApiResponse<CurrentSubscription>>('/api/v1/plans/current', {
+        method: 'GET',
+      }, true),
+
+    subscribe: (planCode: string) =>
+      request<ApiResponse<CurrentSubscription>>('/api/v1/plans/subscribe', {
+        method: 'POST',
+        body: JSON.stringify({ plan_code: planCode }),
       }, true),
   },
 

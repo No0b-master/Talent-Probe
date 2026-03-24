@@ -2,6 +2,9 @@ from fastapi import UploadFile
 
 from app.models.schemas import (
     ATSCheckRequest,
+    ProfessionATSRequest,
+    ProfessionATSResponse,
+    ProfessionOption,
     ATSUsageResponse,
     KeywordGapRequest,
     RegisteredUser,
@@ -22,6 +25,23 @@ class ATSController:
         result = self.service.check_ats(payload, current_user.user_id)
         return success_response(result.model_dump())
 
+    def list_professions(self):
+        items = [ProfessionOption(**item) for item in self.service.list_professions()]
+        return success_response([item.model_dump() for item in items])
+
+    def check_profession_ats(self, current_user: RegisteredUser, payload: ProfessionATSRequest):
+        profession_id, profession_name, analysis_basis, analysis = self.service.check_profession_ats(
+            payload,
+            current_user.user_id,
+        )
+        response = ProfessionATSResponse(
+            profession_id=profession_id,
+            profession_name=profession_name,
+            analysis_basis=analysis_basis,
+            analysis=analysis,
+        )
+        return success_response(response.model_dump())
+
     def get_ats_usage(self, current_user: RegisteredUser):
         usage = ATSUsageResponse(**self.service.get_scan_usage(current_user.user_id))
         return success_response(usage.model_dump())
@@ -34,11 +54,13 @@ class ATSController:
         self.service.delete_scan_history_item(current_user.user_id, scan_id)
         return success_response({"deleted": True, "scan_id": scan_id})
 
-    def optimize_resume(self, payload: ResumeOptimizeRequest):
+    def optimize_resume(self, current_user: RegisteredUser, payload: ResumeOptimizeRequest):
+        self.service.consume_ai_quota(current_user.user_id)
         result = self.service.optimize_resume(payload)
         return success_response(result.model_dump())
 
-    def keyword_gap(self, payload: KeywordGapRequest):
+    def keyword_gap(self, current_user: RegisteredUser, payload: KeywordGapRequest):
+        self.service.consume_ai_quota(current_user.user_id)
         result = self.service.keyword_gap(payload)
         return success_response(result.model_dump())
 

@@ -3,18 +3,17 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { ThemeProvider } from "next-themes";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import LandingPage from "./pages/LandingPage";
-import AuthPage from "./pages/AuthPage";
 import DashboardPage from "./pages/DashboardPage";
 import ProfilePage from "./pages/ProfilePage";
+import PaymentPlansPage from "./pages/PaymentPlansPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-// Redirect authenticated users away from the auth page
+// Redirect authenticated users away from public entry routes
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return null;
@@ -34,14 +33,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/auth"
-        element={
-          <PublicRoute>
-            <AuthPage />
-          </PublicRoute>
-        }
-      />
-      <Route
         path="/dashboard"
         element={
           <ProtectedRoute>
@@ -57,6 +48,14 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/plans"
+        element={
+          <ProtectedRoute>
+            <PaymentPlansPage />
+          </ProtectedRoute>
+        }
+      />
       {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
       <Route path="*" element={<NotFound />} />
     </Routes>
@@ -64,19 +63,17 @@ function AppRoutes() {
 }
 
 const App = () => (
-  <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <AuthProvider>
-            <AppRoutes />
-          </AuthProvider>
-        </BrowserRouter>
-      </TooltipProvider>
-    </QueryClientProvider>
-  </ThemeProvider>
+  <QueryClientProvider client={queryClient}>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </BrowserRouter>
+    </TooltipProvider>
+  </QueryClientProvider>
 );
 
 export default App;

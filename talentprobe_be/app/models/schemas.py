@@ -14,6 +14,19 @@ class ATSCheckRequest(BaseModel):
     resume_file_type: Optional[str] = Field(default=None, max_length=16, description="Optional stored resume file type")
 
 
+class ProfessionOption(BaseModel):
+    profession_id: int
+    profession_name: str
+
+
+class ProfessionATSRequest(BaseModel):
+    resume_text: str = Field(..., min_length=50, description="Raw resume text")
+    profession_id: int = Field(..., ge=1, description="Selected profession id")
+    resume_id: Optional[int] = Field(default=None, ge=1, description="Optional stored resume id")
+    resume_file_name: Optional[str] = Field(default=None, max_length=255, description="Optional stored resume file name")
+    resume_file_type: Optional[str] = Field(default=None, max_length=16, description="Optional stored resume file type")
+
+
 class ScoreBreakdown(BaseModel):
     keyword_match: float
     section_completeness: float
@@ -30,11 +43,44 @@ class ATSCheckResponse(BaseModel):
     recommendations: List[str]
 
 
+class ProfessionATSResponse(BaseModel):
+    profession_id: int
+    profession_name: str
+    analysis_basis: str
+    analysis: ATSCheckResponse
+
+
 class ATSUsageResponse(BaseModel):
     daily_limit: int
     used_today: int
     remaining_today: int
     reset_at_utc: datetime
+    current_plan_code: str
+    current_plan_name: str
+    plan_expires_at: Optional[datetime] = None
+
+
+class SubscriptionPlan(BaseModel):
+    plan_code: str
+    plan_name: str
+    daily_limit: int
+    price_usd: float
+    duration_days: int
+    is_free: bool
+
+
+class CurrentSubscription(BaseModel):
+    current_plan_code: str
+    current_plan_name: str
+    daily_limit: int
+    price_usd: float
+    started_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    is_active_paid: bool
+
+
+class SubscribePlanRequest(BaseModel):
+    plan_code: str = Field(..., min_length=2, max_length=32)
 
 
 class ATSScanHistoryItem(BaseModel):

@@ -1,0 +1,2 @@
+ALTER TABLE users
+ADD COLUMN daily_scan_limit INT NOT NULL DEFAULT 5;

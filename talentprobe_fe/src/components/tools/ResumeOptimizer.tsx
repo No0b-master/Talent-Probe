@@ -54,7 +54,11 @@ function OptimizeResults({ result }: { result: ResumeOptimizeResult }) {
   );
 }
 
-export function ResumeOptimizer() {
+interface ResumeOptimizerProps {
+  onUsageUpdated?: () => void;
+}
+
+export function ResumeOptimizer({ onUsageUpdated }: ResumeOptimizerProps) {
   const { toast } = useToast();
   const [form, setForm] = useState({
     resume_text: '',
@@ -101,6 +105,7 @@ export function ResumeOptimizer() {
       if (res.success) {
         setResult(res.data);
         toast({ title: 'Resume optimized ✓' });
+        onUsageUpdated?.();
       }
     } catch (err: unknown) {
       toast({
