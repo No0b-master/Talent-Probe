@@ -9,6 +9,13 @@ import LandingPage from "./pages/LandingPage";
 import DashboardPage from "./pages/DashboardPage";
 import ProfilePage from "./pages/ProfilePage";
 import PaymentPlansPage from "./pages/PaymentPlansPage";
+import PaymentConfirmationPage from "./pages/PaymentConfirmationPage";
+import PaymentSuccessPage from "./pages/PaymentSuccessPage";
+import PaymentErrorPage from "./pages/PaymentErrorPage";
+import PrivacyPolicyPage from "./pages/PrivacyPolicyPage";
+import RefundPolicyPage from "./pages/RefundPolicyPage";
+import UserDataPrivacyPolicyPage from "./pages/UserDataPrivacyPolicyPage";
+import TermsAndConditionsPage from "./pages/TermsAndConditionsPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -56,6 +63,35 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/payment/confirmation"
+        element={
+          <ProtectedRoute>
+            <PaymentConfirmationPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payment/success"
+        element={
+          <ProtectedRoute>
+            <PaymentSuccessPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payment/error"
+        element={
+          <ProtectedRoute>
+            <PaymentErrorPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+      <Route path="/refund-policy" element={<RefundPolicyPage />} />
+      <Route path="/user-data-privacy-policy" element={<UserDataPrivacyPolicyPage />} />
+      <Route path="/terms-and-conditions" element={<TermsAndConditionsPage />} />
+      <Route path="/terms-and-condition" element={<TermsAndConditionsPage />} />
       {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
       <Route path="*" element={<NotFound />} />
     </Routes>
@@ -67,7 +103,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AuthProvider>
           <AppRoutes />
         </AuthProvider>

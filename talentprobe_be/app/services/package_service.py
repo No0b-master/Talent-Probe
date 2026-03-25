@@ -1,17 +1,23 @@
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
+import json
 from typing import Any
+from uuid import uuid4
 
 import mysql.connector
 from mysql.connector.abstracts import MySQLConnectionAbstract
 
+from app.services.invoice_service import InvoiceService
 from app.services.migration_service import MigrationService
+from app.services.storage_service import InvoiceStorageService
 
 
 class PackageService:
     def __init__(self) -> None:
         MigrationService().run_migrations()
         self.db_config = self._resolve_db_config()
+        self.invoice_service = InvoiceService()
+        self.invoice_storage = InvoiceStorageService()
 
     def list_plans(self) -> list[dict[str, Any]]:
         with closing(self._get_connection()) as conn:
@@ -54,51 +60,112 @@ class PackageService:
     def subscribe_plan(self, user_id: int, plan_code: str) -> dict[str, Any]:
         normalized_code = plan_code.strip().lower()
         now_utc = self._now_utc()
+        transaction_ref = self._build_transaction_ref(user_id)
+
+        audit_payload: dict[str, Any] = {
+            "transaction_ref": transaction_ref,
+            "user_id": user_id,
+            "plan_code": normalized_code,
+            "plan_name": None,
+            "amount_usd": None,
+            "status": "failed",
+            "payment_provider": "internal_mock",
+            "payment_method": "platform_wallet",
+            "invoice_storage_provider": None,
+            "invoice_storage_key": None,
+            "invoice_file_url": None,
+            "error_message": None,
+            "metadata": {"source": "plans.subscribe", "flow": "mock_gateway"},
+            "created_at": now_utc,
+        }
 
         with closing(self._get_connection()) as conn:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute(
-                """
-                SELECT plan_code, plan_name, daily_limit, price_usd, duration_days
-                FROM subscription_plans
-                WHERE plan_code = %s AND is_active = 1
-                LIMIT 1
-                """,
-                (normalized_code,),
-            )
-            plan = cursor.fetchone()
+            try:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute(
+                    """
+                    SELECT plan_code, plan_name, daily_limit, price_usd, duration_days
+                    FROM subscription_plans
+                    WHERE plan_code = %s AND is_active = 1
+                    LIMIT 1
+                    """,
+                    (normalized_code,),
+                )
+                plan = cursor.fetchone()
 
-            if plan is None:
-                raise ValueError("Selected plan is not available")
+                if plan is None:
+                    raise ValueError("Selected plan is not available")
 
-            duration_days = int(plan.get("duration_days") or 30)
-            expires_at = now_utc + timedelta(days=duration_days)
+                billing_profile = self._fetch_user_billing_profile(conn, user_id)
+                if billing_profile is None:
+                    raise ValueError("User not found")
 
-            update_cursor = conn.cursor()
-            update_cursor.execute(
-                """
-                UPDATE users
-                SET
-                    current_plan_code = %s,
-                    daily_scan_limit = %s,
-                    plan_started_at = %s,
-                    plan_expires_at = %s
-                WHERE id = %s
-                """,
-                (
-                    plan["plan_code"],
-                    int(plan["daily_limit"]),
-                    now_utc,
-                    expires_at,
-                    user_id,
-                ),
-            )
-            conn.commit()
+                duration_days = int(plan.get("duration_days") or 30)
+                expires_at = now_utc + timedelta(days=duration_days)
+                amount_usd = float(plan.get("price_usd") or 0)
 
-            if update_cursor.rowcount == 0:
-                raise ValueError("User not found")
+                audit_payload["plan_code"] = str(plan["plan_code"])
+                audit_payload["plan_name"] = str(plan["plan_name"])
+                audit_payload["amount_usd"] = amount_usd
 
-            current_row = self._fetch_user_subscription_row(conn, user_id)
+                invoice_bytes = self.invoice_service.build_subscription_invoice(
+                    transaction_ref=transaction_ref,
+                    user_full_name=str(billing_profile["full_name"]),
+                    user_email=str(billing_profile["email"]),
+                    plan_name=str(plan["plan_name"]),
+                    plan_code=str(plan["plan_code"]),
+                    amount_usd=amount_usd,
+                    period_start=now_utc,
+                    period_end=expires_at,
+                    issued_at=now_utc,
+                )
+
+                invoice_result = self.invoice_storage.save_invoice(user_id, transaction_ref, invoice_bytes)
+
+                audit_payload["invoice_storage_provider"] = invoice_result.get("storage_provider")
+                audit_payload["invoice_storage_key"] = invoice_result.get("storage_key")
+                audit_payload["invoice_file_url"] = invoice_result.get("file_url")
+                audit_payload["status"] = "success"
+                audit_payload["metadata"] = {
+                    "source": "plans.subscribe",
+                    "flow": "mock_gateway",
+                    "duration_days": duration_days,
+                    "issued_at_utc": now_utc.isoformat(),
+                }
+
+                update_cursor = conn.cursor()
+                update_cursor.execute(
+                    """
+                    UPDATE users
+                    SET
+                        current_plan_code = %s,
+                        daily_scan_limit = %s,
+                        plan_started_at = %s,
+                        plan_expires_at = %s
+                    WHERE id = %s
+                    """,
+                    (
+                        plan["plan_code"],
+                        int(plan["daily_limit"]),
+                        now_utc,
+                        expires_at,
+                        user_id,
+                    ),
+                )
+
+                if update_cursor.rowcount == 0:
+                    raise ValueError("User not found")
+
+                self._insert_payment_audit_log(conn, audit_payload)
+                conn.commit()
+
+                current_row = self._fetch_user_subscription_row(conn, user_id)
+            except Exception as exc:
+                conn.rollback()
+                audit_payload["status"] = "failed"
+                audit_payload["error_message"] = str(exc)
+                self._insert_payment_audit_log_best_effort(audit_payload)
+                raise
 
         if current_row is None:
             raise ValueError("User not found")
@@ -178,6 +245,74 @@ class PackageService:
             (user_id,),
         )
         return cursor.fetchone()
+
+    @staticmethod
+    def _fetch_user_billing_profile(conn: MySQLConnectionAbstract, user_id: int) -> dict[str, Any] | None:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT id, full_name, email
+            FROM users
+            WHERE id = %s
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+        return cursor.fetchone()
+
+    def _insert_payment_audit_log(self, conn: MySQLConnectionAbstract, payload: dict[str, Any]) -> None:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO payment_audit_logs (
+                transaction_ref,
+                user_id,
+                plan_code,
+                plan_name,
+                amount_usd,
+                currency,
+                status,
+                payment_provider,
+                payment_method,
+                invoice_storage_provider,
+                invoice_storage_key,
+                invoice_file_url,
+                error_message,
+                metadata_json,
+                created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                payload["transaction_ref"],
+                payload["user_id"],
+                payload.get("plan_code"),
+                payload.get("plan_name"),
+                payload.get("amount_usd"),
+                "USD",
+                payload["status"],
+                payload.get("payment_provider") or "internal_mock",
+                payload.get("payment_method"),
+                payload.get("invoice_storage_provider"),
+                payload.get("invoice_storage_key"),
+                payload.get("invoice_file_url"),
+                payload.get("error_message"),
+                json.dumps(payload.get("metadata") or {}, ensure_ascii=True),
+                payload["created_at"],
+            ),
+        )
+
+    def _insert_payment_audit_log_best_effort(self, payload: dict[str, Any]) -> None:
+        try:
+            with closing(self._get_connection()) as conn:
+                self._insert_payment_audit_log(conn, payload)
+                conn.commit()
+        except Exception:
+            return
+
+    @staticmethod
+    def _build_transaction_ref(user_id: int) -> str:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        return f"TP-{user_id}-{stamp}-{uuid4().hex[:8].upper()}"
 
     def _get_connection(self) -> MySQLConnectionAbstract:
         return mysql.connector.connect(

@@ -1,4 +1,5 @@
 import { Facebook, Instagram, Linkedin, Mail, Phone, Youtube } from "lucide-react";
+import { Link } from "react-router-dom";
 import { BrandMark } from "@/components/BrandMark";
 
 export function CommonFooter() {
@@ -77,6 +78,30 @@ export function CommonFooter() {
         <p className="mt-10 text-center text-xs text-primary-foreground/85">
           Copyright {"\u00A9"} {year} Taleef Technologies. All rights reserved.
         </p>
+
+        <div className="mt-6 border-t border-primary-foreground/20 pt-6 text-center">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-primary-foreground/90">Legal</h3>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-primary-foreground/95">
+            <Link to="/privacy-policy" className="underline-offset-4 transition hover:text-primary-foreground hover:underline">
+              Privacy Policy
+            </Link>
+            <Link to="/refund-policy" className="underline-offset-4 transition hover:text-primary-foreground hover:underline">
+              Refund Policy
+            </Link>
+            <Link
+              to="/user-data-privacy-policy"
+              className="underline-offset-4 transition hover:text-primary-foreground hover:underline"
+            >
+              User Data Privacy Policy
+            </Link>
+            <Link
+              to="/terms-and-conditions"
+              className="underline-offset-4 transition hover:text-primary-foreground hover:underline"
+            >
+              Terms and Conditions
+            </Link>
+          </div>
+        </div>
       </div>
     </footer>
   );

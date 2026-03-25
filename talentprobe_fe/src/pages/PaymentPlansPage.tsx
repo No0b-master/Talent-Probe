@@ -1,8 +1,18 @@
 import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import { CommonHeader } from "@/components/CommonHeader";
 import { CommonFooter } from "@/components/CommonFooter";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { api, type CurrentSubscription, type SubscriptionPlan } from "@/lib/api";
 
@@ -14,11 +24,13 @@ function formatPrice(priceUsd: number): string {
 }
 
 export default function PaymentPlansPage() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
-  const [submittingCode, setSubmittingCode] = useState<string | null>(null);
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [current, setCurrent] = useState<CurrentSubscription | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
+  const [acknowledgedTerms, setAcknowledgedTerms] = useState(false);
 
   const loadPlans = async () => {
     setLoading(true);
@@ -48,26 +60,31 @@ export default function PaymentPlansPage() {
     void loadPlans();
   }, []);
 
-  const handleSubscribe = async (planCode: string) => {
-    setSubmittingCode(planCode);
-    try {
-      const res = await api.plans.subscribe(planCode);
-      if (res.success) {
-        setCurrent(res.data);
-        toast({
-          title: "Plan activated",
-          description: `${res.data.current_plan_name} is active for 30 days.`,
-        });
-      }
-    } catch (err: unknown) {
+  const handleChoosePlan = (plan: SubscriptionPlan) => {
+    setSelectedPlan(plan);
+    setAcknowledgedTerms(false);
+  };
+
+  const closeDialog = () => {
+    setSelectedPlan(null);
+    setAcknowledgedTerms(false);
+  };
+
+  const handleConfirmAndContinue = () => {
+    if (!selectedPlan) {
+      return;
+    }
+
+    if (!acknowledgedTerms) {
       toast({
-        title: "Unable to activate plan",
-        description: err instanceof Error ? err.message : "Please try again",
+        title: "Acknowledgment required",
+        description: "Please confirm that you have read the Terms and Conditions before continuing.",
         variant: "destructive",
       });
-    } finally {
-      setSubmittingCode(null);
+      return;
     }
+
+    navigate(`/payment/confirmation?plan=${encodeURIComponent(selectedPlan.plan_code)}`);
   };
 
   return (
@@ -122,20 +139,58 @@ export default function PaymentPlansPage() {
                     type="button"
                     variant={isCurrent ? "outline" : "brand"}
                     className="mt-6 w-full"
-                    disabled={isCurrent || submittingCode === plan.plan_code}
-                    onClick={() => handleSubscribe(plan.plan_code)}
+                    disabled={isCurrent}
+                    onClick={() => handleChoosePlan(plan)}
                   >
-                    {isCurrent
-                      ? "Current Plan"
-                      : submittingCode === plan.plan_code
-                        ? "Activating..."
-                        : `Choose ${plan.plan_name}`}
+                    {isCurrent ? "Current Plan" : `Choose ${plan.plan_name}`}
                   </Button>
                 </article>
               );
             })}
           </div>
         )}
+
+        <Dialog open={Boolean(selectedPlan)} onOpenChange={(open) => !open && closeDialog()}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Confirm your payment request</DialogTitle>
+              <DialogDescription>
+                You are about to continue with <strong>{selectedPlan?.plan_name}</strong>. Please confirm you have read
+                and accepted our service terms before proceeding.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+              Plan: <span className="font-semibold text-foreground">{selectedPlan?.plan_name}</span>
+              <br />
+              Price: <span className="font-semibold text-foreground">{selectedPlan ? formatPrice(selectedPlan.price_usd) : "-"}</span>
+              <br />
+              Daily limit: <span className="font-semibold text-foreground">{selectedPlan?.daily_limit ?? "-"} scans/day</span>
+            </div>
+
+            <label className="flex items-start gap-3 rounded-md border border-border p-3">
+              <Checkbox checked={acknowledgedTerms} onCheckedChange={(checked) => setAcknowledgedTerms(checked === true)} />
+              <span className="text-sm leading-relaxed text-foreground">
+                I acknowledge that I have read and agree to the
+                {" "}
+                <Link to="/terms-and-conditions" className="font-medium text-primary underline underline-offset-4">
+                  Terms and Conditions
+                </Link>
+                {" "}
+                and related policies.
+              </span>
+            </label>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeDialog}>
+                Cancel
+              </Button>
+              <Button type="button" variant="brand" onClick={handleConfirmAndContinue}>
+                Continue to payment
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </main>
 
       <CommonFooter />
